@@ -1,14 +1,5 @@
 {
   "dependencies": {
-    "com.madumpa.universal.stylized-lit": {
-      "version": "https://github.com/madumpa/URP_StylizedLitShader.git#packageManagerWork",
-      "depth": 0,
-      "source": "git",
-      "dependencies": {
-        "com.unity.render-pipelines.universal": "10.4.0"
-      },
-      "hash": "1c02f2d3d5d764bc1d7573df8beb434f726801c1"
-    },
     "com.unity.burst": {
       "version": "1.6.5",
       "depth": 1,
