@@ -109,7 +109,7 @@ Material:
     - _GlossyReflections: 0
     - _Height: 4
     - _Inverse: 0
-    - _Maxframe: 16
+    - _Maxframe: 15
     - _Metallic: 0
     - _OcclusionStrength: 1
     - _Offset: 1

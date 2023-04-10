@@ -3,11 +3,11 @@ Shader "Unlit/flipBookShader"
     Properties
     {
         _BaseMap("BaseMap",2D) = "white"{}
-        _Width("Width Count",Range(0,4)) = 1 
-        _Height("Height Count",Range(0,4)) = 1 
-        _Offset("Offset",Range(0,3)) = 3 
-        _Speed("speed",Range(0,10)) = 5 
-        _Maxframe("Maxframe",Range(0,30)) = 16 
+        _Width("Width Count",Range(0,5)) = 5 
+        _Height("Height Count",Range(0,5)) = 5 
+        _Offset("Offset",Range(0,3)) = 1 
+        _Speed("speed",Range(0,24)) = 24 
+        _Maxframe("Maxframe",Range(0,30)) = 25 
        [Toggle] _Inverse ("Invert Direction", float) = 0
     }
     SubShader
@@ -63,7 +63,7 @@ Shader "Unlit/flipBookShader"
             float2 Flipbook(float2 UV, float Width, float Height, float Speed, float2 Invert)
             {
                 
-                 Speed = fmod(Speed, Width * Height);
+                Speed = fmod(Speed, Width * Height);
 
                 //float MatrixSize = floor(fmod(_Time.y * Offset, Width * Height));
                 float2 tileCount = float2(1.0,1.0) / float2(Width, Height);
