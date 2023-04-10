@@ -3,6 +3,8 @@ Shader "Unlit/flipBookShader"
     Properties
     {
         _BaseMap("BaseMap",2D) = "white"{}
+        _AlphaMap("AlphaMap",2D) = "white"{}
+        _Cutoff("Alpha cutoff", Range(0, 1)) = 0.5
         _Width("Width Count",Range(0,5)) = 5 
         _Height("Height Count",Range(0,5)) = 5 
         _Offset("Offset",Range(0,3)) = 1 
@@ -17,6 +19,8 @@ Shader "Unlit/flipBookShader"
 
         Pass
         {
+            //Blend SrcAlpha OneMinusSrcAlpha
+            Cull Back
             HLSLPROGRAM
            #pragma vertex vert
            #pragma fragment frag
@@ -37,17 +41,21 @@ Shader "Unlit/flipBookShader"
             };
 
             TEXTURE2D(_BaseMap);
+            TEXTURE2D(_AlphaMap);
             SAMPLER(sampler_BaseMap);
+            SAMPLER(sampler_AlphaMap);
 
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseMap_ST;
+                float4 _AlphaMap_ST;
                 float _Width;
                 float _Height;
                 float _Offset;
                 float2 _Invert;
                 float _Speed;
                 float _Maxframe;
+                float _Cutoff;
 
             CBUFFER_END
 
@@ -88,6 +96,10 @@ Shader "Unlit/flipBookShader"
                 float Frame = floor(fmod(_Time.y * _Speed, _Maxframe));
                 //half4 color = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, float2(IN.uv.x * (1/_Width), IN.uv.y * (1/_Height)));
                 half4 color = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, Flipbook(IN.uv,_Width,_Height,Frame, _Invert));
+                half4 alphaColor = SAMPLE_TEXTURE2D(_AlphaMap, sampler_AlphaMap, IN.uv);
+
+               // color.a = alphaColor.a;
+                clip(color.a - _Cutoff);
                 //half4 color = half4(0.5, 0.0, 0.0, 1.0);
                 //half4 color = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, IN.uv);
                 return color;

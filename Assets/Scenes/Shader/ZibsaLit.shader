@@ -7,6 +7,8 @@ Shader "Universal Render Pipeline/ZibsaLit"
 
         [MainTexture] _BaseMap("Albedo", 2D) = "white" {}
         [MainColor] _BaseColor("Color", Color) = (1,1,1,1)
+        _BaseColor2("BaseColor2", Color) = (1,1,1,1)
+        _TabbyColor("TabbyColor", Color) = (1,1,1,1)
 
         _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
 
@@ -145,12 +147,12 @@ Shader "Universal Render Pipeline/ZibsaLit"
             #pragma fragment LitPassFragment
 
             #include "ZibsaLitInput.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
             #ifndef UNIVERSAL_FORWARD_LIT_PASS_INCLUDED
             #define UNIVERSAL_FORWARD_LIT_PASS_INCLUDED
+            //#include "Packages/com.unity.render-pipelines.universal/Shaders/LitForwardPass.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
-            // GLES2 has limited amount of interpolators
             #if defined(_PARALLAXMAP) && !defined(SHADER_API_GLES)
             #define REQUIRES_TANGENT_SPACE_VIEW_DIR_INTERPOLATOR
             #endif
@@ -274,6 +276,125 @@ Shader "Universal Render Pipeline/ZibsaLit"
             //                  Vertex and Fragment functions                            //
             ///////////////////////////////////////////////////////////////////////////////
 
+            float3 CaculateRadiance(){
+                return float3(0.0, 0.0, 0.0);
+            }
+            half4 UniversalFragmentZibsaPBR(InputData inputData, SurfaceData surfaceData)
+            {
+                #if defined(_SPECULARHIGHLIGHTS_OFF)
+                bool specularHighlightsOff = true;
+                #else
+                bool specularHighlightsOff = false;
+                #endif
+                BRDFData brdfData;
+
+                // NOTE: can modify "surfaceData"...
+                InitializeBRDFData(surfaceData, brdfData);
+
+                #if defined(DEBUG_DISPLAY)
+                half4 debugColor;
+
+                if (CanDebugOverrideOutputColor(inputData, surfaceData, brdfData, debugColor))
+                {
+                    return debugColor;
+                }
+                #endif
+
+                // Clear-coat calculation...
+                BRDFData brdfDataClearCoat = CreateClearCoatBRDFData(surfaceData, brdfData);
+                half4 shadowMask = CalculateShadowMask(inputData);
+                AmbientOcclusionFactor aoFactor = CreateAmbientOcclusionFactor(inputData, surfaceData);
+                uint meshRenderingLayers = GetMeshRenderingLightLayer();
+                Light mainLight = GetMainLight(inputData, shadowMask, aoFactor);
+
+                //float3 radiance = CaculateRadiance(mainLight, inputData.normalWS, 0.5, float3(0, 0, 0));
+
+                // NOTE: We don't apply AO to the GI here because it's done in the lighting calculation below...
+                MixRealtimeAndBakedGI(mainLight, inputData.normalWS, inputData.bakedGI);
+
+                LightingData lightingData = CreateLightingData(inputData, surfaceData);
+
+                lightingData.giColor = GlobalIllumination(brdfData, brdfDataClearCoat, surfaceData.clearCoatMask,
+                                                        inputData.bakedGI, aoFactor.indirectAmbientOcclusion, inputData.positionWS,
+                                                        inputData.normalWS, inputData.viewDirectionWS);
+
+                if (IsMatchingLightLayer(mainLight.layerMask, meshRenderingLayers))
+                {
+                    lightingData.mainLightColor = LightingPhysicallyBased(brdfData, brdfDataClearCoat,
+                                                                        mainLight,
+                                                                        inputData.normalWS, inputData.viewDirectionWS,
+                                                                        surfaceData.clearCoatMask, specularHighlightsOff);
+                }
+
+                #if defined(_ADDITIONAL_LIGHTS)
+                uint pixelLightCount = GetAdditionalLightsCount();
+
+                #if USE_CLUSTERED_LIGHTING
+                for (uint lightIndex = 0; lightIndex < min(_AdditionalLightsDirectionalCount, MAX_VISIBLE_LIGHTS); lightIndex++)
+                {
+                    Light light = GetAdditionalLight(lightIndex, inputData, shadowMask, aoFactor);
+
+                    if (IsMatchingLightLayer(light.layerMask, meshRenderingLayers))
+                    {
+                        lightingData.additionalLightsColor += LightingPhysicallyBased(brdfData, brdfDataClearCoat, light,
+                                                                                    inputData.normalWS, inputData.viewDirectionWS,
+                                                                                    surfaceData.clearCoatMask, specularHighlightsOff);
+                    }
+                }
+                #endif
+
+                LIGHT_LOOP_BEGIN(pixelLightCount)
+                    Light light = GetAdditionalLight(lightIndex, inputData, shadowMask, aoFactor);
+
+                    if (IsMatchingLightLayer(light.layerMask, meshRenderingLayers))
+                    {
+                        lightingData.additionalLightsColor += LightingPhysicallyBased(brdfData, brdfDataClearCoat, light,
+                                                                                    inputData.normalWS, inputData.viewDirectionWS,
+                                                                                    surfaceData.clearCoatMask, specularHighlightsOff);
+                    }
+                LIGHT_LOOP_END
+                #endif
+
+                #if defined(_ADDITIONAL_LIGHTS_VERTEX)
+                lightingData.vertexLightingColor += inputData.vertexLighting * brdfData.diffuse;
+                #endif
+
+                return CalculateFinalColor(lightingData, surfaceData.alpha);
+            }
+
+            // Deprecated: Use the version which takes "SurfaceData" instead of passing all of these arguments...
+            half4 UniversalFragmentZibsaPBR(InputData inputData, half3 albedo, half metallic, half3 specular,
+                half smoothness, half occlusion, half3 emission, half alpha)
+            {
+                SurfaceData surfaceData;
+
+                surfaceData.albedo = albedo;
+                surfaceData.specular = specular;
+                surfaceData.metallic = metallic;
+                surfaceData.smoothness = smoothness;
+                surfaceData.normalTS = half3(0, 0, 1);
+                surfaceData.emission = emission;
+                surfaceData.occlusion = occlusion;
+                surfaceData.alpha = alpha;
+                surfaceData.clearCoatMask = 0;
+                surfaceData.clearCoatSmoothness = 1;
+
+
+                // half3 finalColor = surfaceData.albedo;
+                // float a = step(surfaceData.alpha , 0.9);
+
+                // finalColor = lerp(finalColor, _BaseColor.rgb, surfaceData.albedo.r * a);
+                // finalColor = lerp(finalColor, _BaseColor2.rgb, surfaceData.albedo.g * a);
+                // finalColor = lerp(finalColor, _BaseColor2.rgb, surfaceData.albedo.b * a);
+
+                // surfaceData.albedo = finalColor;
+
+                return UniversalFragmentZibsaPBR(inputData, surfaceData);
+            }
+
+
+
+
             // Used in Standard (Physically Based) shader
             Varyings LitPassVertex(Attributes input)
             {
@@ -365,8 +486,24 @@ Shader "Universal Render Pipeline/ZibsaLit"
             #ifdef _DBUFFER
                 ApplyDecalToSurfaceData(input.positionCS, surfaceData, inputData);
             #endif
+            
+                float4 baseMap = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv);
+                float4 baseColor = UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _BaseColor);
+                float4 baseColor2 = UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _BaseColor2);
+                float4 tabbyColor = UNITY_ACCESS_INSTANCED_PROP(UnityPerMaterial, _TabbyColor);
+                float4 base = baseMap * baseColor;
 
-                half4 color = UniversalFragmentPBR(inputData, surfaceData);
+                float4 finalColor = baseMap;
+                float a = step(baseMap.a, 0.9);
+
+                finalColor = lerp(finalColor, baseColor,  baseMap.r * a);
+                finalColor = lerp(finalColor, baseColor2, baseMap.g * a);
+                finalColor = lerp(finalColor, tabbyColor, baseMap.b * a);
+
+                base.rgb = finalColor.rgb;
+
+                surfaceData.albedo = base.rgb;
+                half4 color = UniversalFragmentZibsaPBR(inputData, surfaceData);
 
                 color.rgb = MixFog(color.rgb, inputData.fogCoord);
                 color.a = OutputAlpha(color.a, _Surface);
@@ -573,7 +710,7 @@ Shader "Universal Render Pipeline/ZibsaLit"
 
             #pragma shader_feature_local_fragment _SPECGLOSSMAP
 
-            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include "ZibsaLitInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/LitMetaPass.hlsl"
 
             ENDHLSL
@@ -713,7 +850,7 @@ Shader "Universal Render Pipeline/ZibsaLit"
             #pragma vertex ShadowPassVertex
             #pragma fragment ShadowPassFragment
 
-            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include "ZibsaLitInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/ShadowCasterPass.hlsl"
             ENDHLSL
         }
@@ -806,7 +943,7 @@ Shader "Universal Render Pipeline/ZibsaLit"
 
             #pragma shader_feature_local_fragment _SPECGLOSSMAP
 
-            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include "ZibsaLitInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/LitMetaPass.hlsl"
 
             ENDHLSL
@@ -836,5 +973,5 @@ Shader "Universal Render Pipeline/ZibsaLit"
     }
 
     FallBack "Hidden/Universal Render Pipeline/FallbackError"
-    CustomEditor "UnityEditor.Rendering.Universal.ShaderGUI.LitShader"
+    //CustomEditor "UnityEditor.Rendering.Universal.ShaderGUI.LitShader"
 }
